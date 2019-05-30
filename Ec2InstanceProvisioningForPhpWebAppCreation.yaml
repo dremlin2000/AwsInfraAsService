@@ -1,0 +1,197 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation Sample Template Update Tutorial Part 1: Sample template
+  that can be used to test EC2 updates. **WARNING** This template creates an Amazon
+  Ec2 Instance. You will be billed for the AWS resources used if you create a stack
+  from this template.'
+Parameters:
+  WebServerInstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+    - t2.micro
+    - t2.medium
+    ConstraintDescription: must be a valid EC2 instance type.
+  VPCId:
+    Description: VPC ID of the Lab VPC
+    Type: 'AWS::EC2::VPC::Id'
+  VPCPublicSubnetId:
+    Description: Subnet ID of the public subnet within the Lab VPC
+    Type: "AWS::EC2::Subnet::Id"
+Mappings:
+  AWSInstanceType2Arch:
+    t2.micro:
+      Arch: '64'
+    t2.medium:
+      Arch: '64'
+  AWSRegionArch2AMI:
+    ap-southeast-2:
+      '64': ami-0fb7513bcdc525c3b
+    us-east-1:
+      '64': ami-8c1be5f6
+    us-east-2:
+      '64': ami-c5062ba0
+    us-west-1:
+      '64': ami-02eada62
+    us-west-2:
+      '64': ami-e689729e
+    ap-southeast-1:
+      '64': ami-0797ea64
+    ap-southeast-2:
+      '64': ami-8536d6e7
+    ap-northeast-1:
+      '64': ami-2a69be4c
+    ap-northeast-2:
+      '64': ami-9bec36f5
+    eu-west-1:
+      '64': ami-acd005d5
+    eu-central-1:
+      '64': ami-c7ee5ca8
+    sa-east-1:
+      '64': ami-f1344b9d
+Resources:
+  WebServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - ec2-role
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP
+      VpcId:
+        Ref: VPCId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+  Endpoint:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId:
+        Ref: WebServerHost
+  WebServerHost:
+    Type: AWS::EC2::Instance
+    Metadata:
+      Comment: Install a simple PHP application
+      AWS::CloudFormation::Init:
+        config:
+          packages:
+            yum:
+              httpd: []
+              php: []
+          files:
+            "/var/www/html/index.php":
+              content:
+                Fn::Join:
+                - ''
+                - - "<?php\n"
+                  - 'echo ''<h1>AWS CloudFormation sample PHP application</h1>'';'
+                  - "?>\n"
+              mode: '000644'
+              owner: apache
+              group: apache
+            "/etc/cfn/cfn-hup.conf":
+              content:
+                Fn::Join:
+                - ''
+                - - "[main]\n"
+                  - stack=
+                  - Ref: AWS::StackName
+                  - "\n"
+                  - region=
+                  - Ref: AWS::Region
+                  - "\n"
+              mode: '000400'
+              owner: root
+              group: root
+            "/etc/cfn/hooks.d/cfn-auto-reloader.conf":
+              content:
+                Fn::Join:
+                - ''
+                - - "[cfn-auto-reloader-hook]\n"
+                  - 'triggers=post.update'
+                  - 'path=Resources.WebServerHost.Metadata.AWS::CloudFormation::Init'
+                  - 'action=/opt/aws/bin/cfn-init -s '
+                  - Ref: AWS::StackName
+                  - " -r WebServerHost "
+                  - " --region     "
+                  - Ref: AWS::Region
+                  - "\n"
+                  - 'runas=root'
+          services:
+            sysvinit:
+              httpd:
+                enabled: 'true'
+                ensureRunning: 'true'
+              sendmail:
+                enabled: 'false'
+                ensureRunning: 'false'
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+        - AWSRegionArch2AMI
+        - Ref: AWS::Region
+        - Fn::FindInMap:
+          - AWSInstanceType2Arch
+          - Ref: WebServerInstanceType
+          - Arch
+      InstanceType:
+        Ref: WebServerInstanceType
+      NetworkInterfaces:
+      - DeviceIndex: '0'
+        AssociatePublicIpAddress: 'true'
+        SubnetId:
+          Ref: VPCPublicSubnetId
+        GroupSet:
+        - Ref: WebServerSecurityGroup
+      IamInstanceProfile:
+        Ref: WebServerInstanceProfile
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - ''
+          - - "#!/bin/bash\n"
+            - 'yum update -y aws-cfn-bootstrap'
+            - "# Helper function\n"
+            - 'function error_exit'
+            - "{\n"
+            - '  /opt/aws/bin/cfn-signal -e 1 -r "$1" '''
+            - Ref: WebServerWaitHandle
+            - "'\n"
+            - "  exit 1\n"
+            - "}\n"
+            - "# Install the simple web page\n"
+            - "/opt/aws/bin/cfn-init -s "
+            - Ref: AWS::StackName
+            - " -r WebServerHost "
+            - "         --region "
+            - Ref: AWS::Region
+            - " || error_exit 'Failed to run cfn-init'\n"
+            - "# Start up the cfn-hup daemon to listen for changes to the Web Server
+              metadata\n"
+            - "/opt/aws/bin/cfn-hup || error_exit 'Failed to start cfn-hup'\n"
+            - "# All done so signal success\n"
+            - /opt/aws/bin/cfn-signal -e 0 -r "WebServer setup complete" '
+            - Ref: WebServerWaitHandle
+            - "'\n"
+  WebServerWaitHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+  WebServerWaitCondition:
+    Type: AWS::CloudFormation::WaitCondition
+    DependsOn: WebServerHost
+    Properties:
+      Handle:
+        Ref: WebServerWaitHandle
+      Timeout: '600'
+Outputs:
+  WebsiteURL:
+    Value:
+      Fn::Join:
+      - ''
+      - - http://
+        - Ref: Endpoint
+    Description: Application URL
