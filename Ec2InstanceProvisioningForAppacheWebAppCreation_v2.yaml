@@ -1,0 +1,138 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation Sample Template Update Tutorial Part 1: Sample template
+  that can be used to test EC2 updates. **WARNING** This template creates an Amazon
+  Ec2 Instance. You will be billed for the AWS resources used if you create a stack
+  from this template.'
+Parameters:
+  WebServerInstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+    - t2.micro
+    - t2.medium
+    ConstraintDescription: must be a valid EC2 instance type.
+  VPCId:
+    Description: VPC ID of the Lab VPC
+    Type: 'AWS::EC2::VPC::Id'
+  VPCPublicSubnetId:
+    Description: Subnet ID of the public subnet within the Lab VPC
+    Type: "AWS::EC2::Subnet::Id"
+  Ec2KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    ConstraintDescription: must be the name of an existing EC2 KeyPair
+Mappings:
+  AWSInstanceType2Arch:
+    t2.micro:
+      Arch: '64'
+    t2.medium:
+      Arch: '64'
+  AWSRegionArch2AMI:
+    us-east-1:
+      '64': ami-8c1be5f6
+    us-east-2:
+      '64': ami-c5062ba0
+    us-west-1:
+      '64': ami-02eada62
+    us-west-2:
+      '64': ami-e689729e
+    ap-southeast-1:
+      '64': ami-0797ea64
+    ap-southeast-2:
+      '64': ami-0fb7513bcdc525c3b
+    ap-northeast-1:
+      '64': ami-2a69be4c
+    ap-northeast-2:
+      '64': ami-9bec36f5
+    eu-west-1:
+      '64': ami-acd005d5
+    eu-central-1:
+      '64': ami-c7ee5ca8
+    sa-east-1:
+      '64': ami-f1344b9d
+Resources:
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      RoleName: ec2-role
+  WebServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - Ref: Ec2Role
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP
+      VpcId:
+        Ref: VPCId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: 0.0.0.0/0
+  Endpoint:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId:
+        Ref: WebServerHost
+  WebServerHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+        - AWSRegionArch2AMI
+        - Ref: AWS::Region
+        - Fn::FindInMap:
+          - AWSInstanceType2Arch
+          - Ref: WebServerInstanceType
+          - Arch
+      InstanceType:
+        Ref: WebServerInstanceType
+      NetworkInterfaces:
+      - DeviceIndex: '0'
+        AssociatePublicIpAddress: 'true'
+        SubnetId:
+          Ref: VPCPublicSubnetId
+        GroupSet:
+        - Ref: WebServerSecurityGroup
+      IamInstanceProfile:
+        Ref: WebServerInstanceProfile
+      KeyName:
+        Ref: Ec2KeyPairName
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - ''
+          - - "#!/bin/bash\n"
+            - "sudo su\n"
+            - "yum update -y\n"
+            - "yum update -y\n"
+            - "yum install -y httpd.x86_64\n"
+            - "systemctl start httpd.service\n"
+            - "systemctl enable httpd.service\n"
+            - 'echo "Hello World from $(hostname -f)" > /var/www/html/index.html\n'
+Outputs:
+  WebsiteURL:
+    Value:
+      Fn::Join:
+      - ''
+      - - http://
+        - Ref: Endpoint
+    Description: Application URL
