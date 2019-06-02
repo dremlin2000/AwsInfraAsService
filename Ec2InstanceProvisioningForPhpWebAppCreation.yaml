@@ -19,6 +19,10 @@ Parameters:
   VPCPublicSubnetId:
     Description: Subnet ID of the public subnet within the Lab VPC
     Type: "AWS::EC2::Subnet::Id"
+  Ec2KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    ConstraintDescription: must be the name of an existing EC2 KeyPair
 Mappings:
   AWSInstanceType2Arch:
     t2.micro:
@@ -51,12 +55,25 @@ Mappings:
     sa-east-1:
       '64': ami-f1344b9d
 Resources:
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      RoleName: ec2-role
   WebServerInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: "/"
       Roles:
-      - ec2-role
+      - Ref: Ec2Role
   WebServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -67,6 +84,10 @@ Resources:
       - IpProtocol: tcp
         FromPort: '80'
         ToPort: '80'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
         CidrIp: 0.0.0.0/0
   Endpoint:
     Type: AWS::EC2::EIP
@@ -150,6 +171,8 @@ Resources:
         - Ref: WebServerSecurityGroup
       IamInstanceProfile:
         Ref: WebServerInstanceProfile
+      KeyName:
+        Ref: Ec2KeyPairName
       UserData:
         Fn::Base64:
           Fn::Join:
