@@ -1,9 +1,7 @@
----
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'AWS CloudFormation Sample Template Update Tutorial Part 1: Sample template
-  that can be used to test EC2 updates. **WARNING** This template creates an Amazon
-  Ec2 Instance. You will be billed for the AWS resources used if you create a stack
-  from this template.'
+Description: 'AWS CloudFormation Sample Template UpdateTutorial Part 5: Sample template that can be used to test EC2 updates 
+              convert a single instance deployment into an Auto Scaled, Load Balanced solutio. **WARNING** This template creates an
+              Amazon Ec2 Instance. You will be billed for the AWS resources used if you create a stack from this template.'
 Parameters:
   WebServerInstanceType:
     Description: WebServer EC2 instance type
@@ -15,10 +13,14 @@ Parameters:
     ConstraintDescription: must be a valid EC2 instance type.
   VPCId:
     Description: VPC ID of the Lab VPC
-    Type: 'AWS::EC2::VPC::Id'
+    Type: AWS::EC2::VPC::Id
+    AllowedPattern: .+
   VPCPublicSubnetId:
     Description: Subnet ID of the public subnet within the Lab VPC
-    Type: "AWS::EC2::Subnet::Id"
+    Type: AWS::EC2::Subnet::Id
+  VPCPublicSubnetAZ:
+    Description: Subnet ID of the public subnet within the Lab VPC
+    Type: AWS::EC2::AvailabilityZone::Name
   Ec2KeyPairName:
     Type: AWS::EC2::KeyPair::KeyName
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
@@ -72,10 +74,26 @@ Resources:
       Path: "/"
       Roles:
       - Ref: Ec2Role
-  WebServerSecurityGroup:
+  Ec2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Enable HTTP
+      GroupDescription: Enable HTTP traffic from load balancer only
+      VpcId:
+        Ref: VPCId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        SourceSecurityGroupId:
+          Ref: LoadBalancerSecurityGroup
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: 0.0.0.0/0
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP only
       VpcId:
         Ref: VPCId
       SecurityGroupIngress:
@@ -83,17 +101,38 @@ Resources:
         FromPort: '80'
         ToPort: '80'
         CidrIp: 0.0.0.0/0
-      - IpProtocol: tcp
-        FromPort: '22'
-        ToPort: '22'
-        CidrIp: 0.0.0.0/0
-  Endpoint:
-    Type: AWS::EC2::EIP
+  ElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
     Properties:
-      InstanceId:
-        Ref: WebServerHost
-  WebServerHost:
-    Type: AWS::EC2::Instance
+      Subnets:
+      - Ref: VPCPublicSubnetId
+      SecurityGroups:
+      - Ref: LoadBalancerSecurityGroup
+      Listeners:
+      - LoadBalancerPort: '80'
+        InstancePort: '80'
+        Protocol: HTTP
+      HealthCheck:
+        Target: HTTP:80/
+        HealthyThreshold: '3'
+        UnhealthyThreshold: '5'
+        Interval: '30'
+        Timeout: '5'
+  WebServerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AvailabilityZones:
+      - Ref: VPCPublicSubnetAZ
+      LaunchConfigurationName:
+        Ref: WebServerConfig
+      MinSize: '1'
+      MaxSize: '2'
+      LoadBalancerNames:
+      - Ref: ElasticLoadBalancer
+      VPCZoneIdentifier:
+      - Ref: VPCPublicSubnetId
+  WebServerConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       ImageId:
         Fn::FindInMap:
@@ -105,17 +144,14 @@ Resources:
           - Arch
       InstanceType:
         Ref: WebServerInstanceType
-      NetworkInterfaces:
-      - DeviceIndex: '0'
-        AssociatePublicIpAddress: 'true'
-        SubnetId:
-          Ref: VPCPublicSubnetId
-        GroupSet:
-        - Ref: WebServerSecurityGroup
       IamInstanceProfile:
         Ref: WebServerInstanceProfile
       KeyName:
         Ref: Ec2KeyPairName
+      SecurityGroups:
+        - Ref: Ec2SecurityGroup
+      #AssociatePublicIpAddress:
+      #  true
       UserData:
         Fn::Base64:
           Fn::Join:
@@ -134,5 +170,7 @@ Outputs:
       Fn::Join:
       - ''
       - - http://
-        - Ref: Endpoint
+        - Fn::GetAtt:
+          - ElasticLoadBalancer
+          - DNSName
     Description: Application URL
