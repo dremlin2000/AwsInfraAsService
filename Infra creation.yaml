@@ -58,7 +58,7 @@ Resources:
         - !GetAZs ''
       Tags:
         - Key: Name
-          Value: Public Subnet 2
+          Value: Public Subnet 3
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet

@@ -15,16 +15,23 @@ Parameters:
     Description: VPC ID of the Lab VPC
     Type: AWS::EC2::VPC::Id
     AllowedPattern: .+
-  VPCPublicSubnetId:
-    Description: Subnet ID of the public subnet within the Lab VPC
-    Type: AWS::EC2::Subnet::Id
-  VPCPublicSubnetAZ:
-    Description: Subnet ID of the public subnet within the Lab VPC
-    Type: AWS::EC2::AvailabilityZone::Name
+  Ec2Subnets:
+    Description: Subnets of EC2 instances
+    Type: List<AWS::EC2::Subnet::Id>
+    AllowedPattern: .+
+  LoadBalancerSubnets:
+    Description: Subnets of the load balancer
+    Type: List<AWS::EC2::Subnet::Id>
+    AllowedPattern: .+
+  Ec2SubnetsAZ:
+    Description: Availability zones of the subnets of the load balancer
+    Type: List<AWS::EC2::AvailabilityZone::Name>
+    AllowedPattern: .+
   Ec2KeyPairName:
     Type: AWS::EC2::KeyPair::KeyName
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
     ConstraintDescription: must be the name of an existing EC2 KeyPair
+    AllowedPattern: .+
 Mappings:
   AWSInstanceType2Arch:
     t2.micro:
@@ -105,7 +112,7 @@ Resources:
     Type: AWS::ElasticLoadBalancing::LoadBalancer
     Properties:
       Subnets:
-      - Ref: VPCPublicSubnetId
+        Ref: LoadBalancerSubnets
       SecurityGroups:
       - Ref: LoadBalancerSecurityGroup
       Listeners:
@@ -122,7 +129,7 @@ Resources:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       AvailabilityZones:
-      - Ref: VPCPublicSubnetAZ
+        Ref: Ec2SubnetsAZ
       LaunchConfigurationName:
         Ref: WebServerConfig
       MinSize: '1'
@@ -130,7 +137,7 @@ Resources:
       LoadBalancerNames:
       - Ref: ElasticLoadBalancer
       VPCZoneIdentifier:
-      - Ref: VPCPublicSubnetId
+        Ref: Ec2Subnets
   WebServerConfig:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -150,8 +157,8 @@ Resources:
         Ref: Ec2KeyPairName
       SecurityGroups:
         - Ref: Ec2SecurityGroup
-      #AssociatePublicIpAddress:
-      #  true
+      AssociatePublicIpAddress:
+        true
       UserData:
         Fn::Base64:
           Fn::Join:
@@ -159,11 +166,10 @@ Resources:
           - - "#!/bin/bash\n"
             - "sudo su\n"
             - "yum update -y\n"
-            - "yum update -y\n"
             - "yum install -y httpd.x86_64\n"
             - "systemctl start httpd.service\n"
             - "systemctl enable httpd.service\n"
-            - 'echo "Hello World from $(hostname -f)" > /var/www/html/index.html\n'
+            - 'echo "Hello World from $(hostname -f)" > /var/www/html/index.html'
 Outputs:
   WebsiteURL:
     Value:
