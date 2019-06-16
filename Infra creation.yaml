@@ -32,6 +32,7 @@ Resources:
       AvailabilityZone: !Select 
         - '0'
         - !GetAZs ''
+      MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
           Value: Public Subnet 1
@@ -44,6 +45,7 @@ Resources:
       AvailabilityZone: !Select 
         - '1'
         - !GetAZs ''
+      MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
           Value: Public Subnet 2
@@ -56,6 +58,7 @@ Resources:
       AvailabilityZone: !Select 
         - '2'
         - !GetAZs ''
+      MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
           Value: Public Subnet 3
