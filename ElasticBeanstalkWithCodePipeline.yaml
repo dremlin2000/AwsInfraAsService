@@ -95,7 +95,7 @@ Resources:
           Value: '1'
         - Namespace: aws:autoscaling:asg
           OptionName: MaxSize
-          Value: '1'
+          Value: '2'
         - Namespace: aws:elasticbeanstalk:environment
           OptionName: EnvironmentType
           Value: LoadBalanced
