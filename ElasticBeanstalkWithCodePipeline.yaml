@@ -30,6 +30,30 @@ Parameters:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
     ConstraintDescription: must be the name of an existing EC2 KeyPair
     AllowedPattern: .+
+  AutoScalingMinInstanceCount:
+    Description: Minimum number of EC2 instances for Auto Scaling
+    Type: String
+    Default: 1
+    ConstraintDescription: Specify a number between 1 - 20
+  AutoScalingMaxInstanceCount:
+    Description: Maximum number of EC2 instances for Auto Scaling
+    Type: String
+    Default: 2
+    ConstraintDescription: Specify a number between 1 - 20
+  Ec2InstanceType:
+    Description: The instance type for the dev environment
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    Default: t2.micro
+  SSLCertificateArn:
+    Description: The SSL/TLS certificate ARN
+    Type: String
+    MinLength: 0
+    MaxLength: 2048
+    Default: ""
+Conditions:
+  TlsEnabled: !Not [ !Equals [ !Ref SSLCertificateArn, "" ] ]
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -44,27 +68,75 @@ Metadata:
       RepositoryBranch:
         default: CodeCommit Repository Branch
 Resources:
-  # WebServerConfig:
-  #   Type: AWS::AutoScaling::LaunchConfiguration
-  #   Properties:
-  #     ImageId:
-  #       Fn::FindInMap:
-  #       - AWSRegionArch2AMI
-  #       - Ref: AWS::Region
-  #       - Fn::FindInMap:
-  #         - AWSInstanceType2Arch
-  #         - Ref: WebServerInstanceType
-  #         - Arch
-  #     InstanceType:
-  #       Ref: WebServerInstanceType
-  #     IamInstanceProfile:
-  #       Ref: WebServerInstanceProfile
-  #     KeyName:
-  #       Ref: Ec2KeyPairName
-  #     SecurityGroups:
-  #       - Ref: Ec2SecurityGroup
-  #     AssociatePublicIpAddress:
-  #       true
+  ElasticBeanstalkServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": { "Service": [ "elasticbeanstalk.amazonaws.com" ]},
+            "Action": [ "sts:AssumeRole" ]
+          }]
+        }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
+        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService
+
+  Ec2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP traffic from load balancer only
+      VpcId:
+        Ref: VPCId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        SourceSecurityGroupId:
+          Ref: LoadBalancerSecurityGroup
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: 0.0.0.0/0
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP only
+      VpcId:
+        Ref: VPCId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      RoleName:
+        Fn::Join:
+          - "-"
+          - - Ref: AWS::StackName
+            - ec2-role
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - Ref: Ec2Role
 
   nodeApplication:
     Type: AWS::ElasticBeanstalk::Application
@@ -92,37 +164,119 @@ Resources:
       OptionSettings:
         - Namespace: aws:autoscaling:asg
           OptionName: MinSize
-          Value: '1'
+          Value: !Ref AutoScalingMinInstanceCount
+
         - Namespace: aws:autoscaling:asg
           OptionName: MaxSize
-          Value: '2'
+          Value: !Ref AutoScalingMaxInstanceCount
+
         - Namespace: aws:elasticbeanstalk:environment
           OptionName: EnvironmentType
           Value: LoadBalanced
+        
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: LoadBalancerType
+          Value: application
+
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: ServiceRole
+          Value: !Ref ElasticBeanstalkServiceRole
+
         - Namespace: aws:ec2:vpc
           OptionName: VPCId
           Value: !Ref VPCId
+
         - Namespace: aws:ec2:vpc
           OptionName: Subnets
           Value:
             Fn::Join:
               - ","
               - !Ref Subnets
+
         - Namespace: aws:ec2:vpc
           OptionName: ELBSubnets
           Value:
             Fn::Join:
               - ","
               - !Ref Subnets
+
         - Namespace: aws:autoscaling:launchconfiguration
           OptionName: InstanceType
-          Value: t2.micro
-        # - Namespace: aws:autoscaling:launchconfiguration
-        #   OptionName: AssociatePublicIpAddress
-        #   Value: true
+          Value: !Ref Ec2InstanceType
+        
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: IamInstanceProfile
+          Value: !Ref Ec2InstanceProfile
+
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: SecurityGroups
+          Value:
+            - - Ec2SecurityGroup
+
         - Namespace: aws:autoscaling:launchconfiguration
           OptionName: EC2KeyName
           Value: !Ref Ec2KeyPairName
+
+        - Namespace: aws:autoscaling:updatepolicy:rollingupdate
+          OptionName: RollingUpdateEnabled
+          Value: true
+
+        - Namespace: aws:autoscaling:updatepolicy:rollingupdate
+          OptionName: RollingUpdateType
+          Value: Health
+
+        - Namespace: aws:autoscaling:trigger
+          OptionName: MeasureName
+          Value: CPUUtilization
+
+        - Namespace: aws:autoscaling:trigger
+          OptionName: Unit
+          Value: Percent
+
+        - Namespace: aws:autoscaling:trigger
+          OptionName: UpperThreshold
+          Value: 80
+
+        - Namespace: aws:autoscaling:trigger
+          OptionName: LowerThreshold
+          Value: 40
+
+        - Namespace: aws:elbv2:listener:default
+          OptionName: ListenerEnabled
+          Value: !If [ TlsEnabled, false, true ]
+
+        - Namespace: aws:elbv2:loadbalancer
+          OptionName: SecurityGroups
+          Value:
+            - - !Ref LoadBalancerSecurityGroup            
+
+        - Namespace: aws:elbv2:loadbalancer
+          OptionName: ManagedSecurityGroup
+          Value:
+            - - !Ref LoadBalancerSecurityGroup
+
+        - Namespace: aws:elbv2:listenerrule:default
+          OptionName: PathPatterns
+          Value: "/*"
+        
+        - Namespace: !Sub
+          - "aws:elbv2:listener:${ListenPort}"
+          - ListenPort: !If [ TlsEnabled, 443, 80 ]
+          OptionName: Protocol
+          Value: !If [ TlsEnabled, HTTPS, HTTP ]
+
+        - Namespace: !Sub
+          - "aws:elbv2:listener:${ListenPort}"
+          - ListenPort: !If [ TlsEnabled, 443, 80 ]
+          OptionName: Rules
+          Value: default
+
+        - Namespace: !Sub
+          - "aws:elbv2:listener:${ListenPort}"
+          - ListenPort: !If [ TlsEnabled, 443, 80 ]
+          OptionName: SSLCertificateArns
+          Value: !Ref SSLCertificateArn
+
       SolutionStackName: 64bit Amazon Linux 2018.03 v4.9.0 running Node.js
   nodeEnvironment:
     Type: AWS::ElasticBeanstalk::Environment
