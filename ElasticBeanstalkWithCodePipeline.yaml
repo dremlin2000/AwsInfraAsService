@@ -1,9 +1,10 @@
 ---
-Description: Deploy an Elastic Beanstalk app stored in CodeCommit via CodePipeline.
+Description:
+  Deploy an Elastic Beanstalk app stored in CodeCommit via CodePipeline.
   **WARNING** This template creates one or more Amazon EC2 instances and a CodePipeline
   pipeline. You will be billed for the AWS resources used if you create a stack from
   this template.
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Parameters:
   RepositoryName:
     Description: The name of your CodeCommit repo. Go to https://console.aws.amazon.com/codecommit.
@@ -53,15 +54,15 @@ Parameters:
     MaxLength: 2048
     Default: ""
 Conditions:
-  TlsEnabled: !Not [ !Equals [ !Ref SSLCertificateArn, "" ] ]
+  TlsEnabled: !Not [!Equals [!Ref SSLCertificateArn, ""]]
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
-    - Label:
-        default: CodeCommit Repository
-      Parameters:
-      - RepositoryName
-      - RepositoryBranch
+      - Label:
+          default: CodeCommit Repository
+        Parameters:
+          - RepositoryName
+          - RepositoryBranch
     ParameterLabels:
       RepositoryName:
         default: CodeCommit Repository Name
@@ -91,15 +92,15 @@ Resources:
       VpcId:
         Ref: VPCId
       SecurityGroupIngress:
-      - IpProtocol: tcp
-        FromPort: '80'
-        ToPort: '80'
-        SourceSecurityGroupId:
-          Ref: LoadBalancerSecurityGroup
-      - IpProtocol: tcp
-        FromPort: '22'
-        ToPort: '22'
-        CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: "80"
+          ToPort: "80"
+          SourceSecurityGroupId:
+            Ref: LoadBalancerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: 0.0.0.0/0
 
   LoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -108,22 +109,22 @@ Resources:
       VpcId:
         Ref: VPCId
       SecurityGroupIngress:
-      - IpProtocol: tcp
-        FromPort: '80'
-        ToPort: '80'
-        CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: 0.0.0.0/0
 
   Ec2Role:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-            - ec2.amazonaws.com
-          Action:
-          - sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
       Path: "/"
       RoleName:
         Fn::Join:
@@ -136,7 +137,7 @@ Resources:
     Properties:
       Path: "/"
       Roles:
-      - Ref: Ec2Role
+        - Ref: Ec2Role
 
   nodeApplication:
     Type: AWS::ElasticBeanstalk::Application
@@ -151,15 +152,14 @@ Resources:
       SourceBundle:
         S3Bucket:
           Fn::Join:
-          - "-"
-          - - elasticbeanstalk-samples
-            - Ref: AWS::Region
+            - "-"
+            - - elasticbeanstalk-samples
+              - Ref: AWS::Region
         S3Key: nodejs-sample.zip
   nodeConfigurationTemplate:
     Type: AWS::ElasticBeanstalk::ConfigurationTemplate
     Properties:
-      ApplicationName:
-        Ref: nodeApplication
+      ApplicationName: !Ref nodeApplication
       Description: AWS ElasticBeanstalk Sample Configuration Template
       OptionSettings:
         - Namespace: aws:autoscaling:asg
@@ -173,7 +173,7 @@ Resources:
         - Namespace: aws:elasticbeanstalk:environment
           OptionName: EnvironmentType
           Value: LoadBalanced
-        
+
         - Namespace: aws:elasticbeanstalk:environment
           OptionName: LoadBalancerType
           Value: application
@@ -203,15 +203,14 @@ Resources:
         - Namespace: aws:autoscaling:launchconfiguration
           OptionName: InstanceType
           Value: !Ref Ec2InstanceType
-        
+
         - Namespace: aws:autoscaling:launchconfiguration
           OptionName: IamInstanceProfile
           Value: !Ref Ec2InstanceProfile
 
         - Namespace: aws:autoscaling:launchconfiguration
           OptionName: SecurityGroups
-          Value:
-            - - Ec2SecurityGroup
+          Value: !Ref Ec2SecurityGroup
 
         - Namespace: aws:autoscaling:launchconfiguration
           OptionName: EC2KeyName
@@ -243,37 +242,34 @@ Resources:
 
         - Namespace: aws:elbv2:listener:default
           OptionName: ListenerEnabled
-          Value: !If [ TlsEnabled, false, true ]
+          Value: !If [TlsEnabled, false, true]
 
         - Namespace: aws:elbv2:loadbalancer
           OptionName: SecurityGroups
-          Value:
-            - - !Ref LoadBalancerSecurityGroup            
+          Value: !Ref LoadBalancerSecurityGroup
 
         - Namespace: aws:elbv2:loadbalancer
           OptionName: ManagedSecurityGroup
-          Value:
-            - - !Ref LoadBalancerSecurityGroup
+          Value: !Ref LoadBalancerSecurityGroup
 
         - Namespace: aws:elbv2:listenerrule:default
           OptionName: PathPatterns
           Value: "/*"
-        
-        - Namespace: !Sub
-          - "aws:elbv2:listener:${ListenPort}"
-          - ListenPort: !If [ TlsEnabled, 443, 80 ]
-          OptionName: Protocol
-          Value: !If [ TlsEnabled, HTTPS, HTTP ]
 
         - Namespace: !Sub
-          - "aws:elbv2:listener:${ListenPort}"
-          - ListenPort: !If [ TlsEnabled, 443, 80 ]
+            - "aws:elbv2:listener:${ListenPort}"
+            - ListenPort: !If [TlsEnabled, 443, 80]
+          OptionName: Protocol
+          Value: !If [TlsEnabled, HTTPS, HTTP]
+        - Namespace: !Sub
+            - "aws:elbv2:listener:${ListenPort}"
+            - ListenPort: !If [TlsEnabled, 443, 80]
           OptionName: Rules
           Value: default
 
         - Namespace: !Sub
-          - "aws:elbv2:listener:${ListenPort}"
-          - ListenPort: !If [ TlsEnabled, 443, 80 ]
+            - "aws:elbv2:listener:${ListenPort}"
+            - ListenPort: !If [TlsEnabled, 443, 80]
           OptionName: SSLCertificateArns
           Value: !Ref SSLCertificateArn
 
@@ -281,9 +277,9 @@ Resources:
   nodeEnvironment:
     Type: AWS::ElasticBeanstalk::Environment
     DependsOn:
-    - nodeApplication
-    - nodeConfigurationTemplate
-    - nodeApplicationVersion
+      - nodeApplication
+      - nodeConfigurationTemplate
+      - nodeApplicationVersion
     Properties:
       ApplicationName:
         Ref: nodeApplication
@@ -297,111 +293,111 @@ Resources:
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-            - codepipeline.amazonaws.com
-          Action:
-          - sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
       Path: "/"
       Policies:
-      - PolicyName: codepipeline-service
-        PolicyDocument:
-          Statement:
-          - Action:
-            - codecommit:GetBranch
-            - codecommit:GetCommit
-            - codecommit:UploadArchive
-            - codecommit:GetUploadArchiveStatus
-            - codecommit:CancelUploadArchive
-            Resource: "*"
-            Effect: Allow
-          - Action:
-            - s3:GetObject
-            - s3:GetObjectVersion
-            - s3:GetBucketVersioning
-            Resource: "*"
-            Effect: Allow
-          - Action:
-            - s3:PutObject
-            Resource:
-            - arn:aws:s3:::codepipeline*
-            - arn:aws:s3:::elasticbeanstalk*
-            Effect: Allow
-          - Action:
-            - codedeploy:CreateDeployment
-            - codedeploy:GetApplicationRevision
-            - codedeploy:GetDeployment
-            - codedeploy:GetDeploymentConfig
-            - codedeploy:RegisterApplicationRevision
-            Resource: "*"
-            Effect: Allow
-          - Action:
-            - elasticbeanstalk:*
-            - ec2:*
-            - elasticloadbalancing:*
-            - autoscaling:*
-            - cloudwatch:*
-            - s3:*
-            - sns:*
-            - cloudformation:*
-            - rds:*
-            - sqs:*
-            - ecs:*
-            - iam:PassRole
-            Resource: "*"
-            Effect: Allow
-          - Action:
-            - lambda:InvokeFunction
-            - lambda:ListFunctions
-            Resource: "*"
-            Effect: Allow
-          Version: '2012-10-17'
+        - PolicyName: codepipeline-service
+          PolicyDocument:
+            Statement:
+              - Action:
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                  - codecommit:UploadArchive
+                  - codecommit:GetUploadArchiveStatus
+                  - codecommit:CancelUploadArchive
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                  - s3:PutObject
+                Resource:
+                  - arn:aws:s3:::codepipeline*
+                  - arn:aws:s3:::elasticbeanstalk*
+                Effect: Allow
+              - Action:
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                  - elasticbeanstalk:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - autoscaling:*
+                  - cloudwatch:*
+                  - s3:*
+                  - sns:*
+                  - cloudformation:*
+                  - rds:*
+                  - sqs:*
+                  - ecs:*
+                  - iam:PassRole
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                  - lambda:InvokeFunction
+                  - lambda:ListFunctions
+                Resource: "*"
+                Effect: Allow
+            Version: "2012-10-17"
   ArtifactBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
   CodePipelineStack:
     Type: AWS::CodePipeline::Pipeline
     DependsOn:
-    - nodeApplication
-    - nodeEnvironment
+      - nodeApplication
+      - nodeEnvironment
     Properties:
       RoleArn: !GetAtt CodePipelineRole.Arn
       Stages:
-      - Name: Source
-        Actions:
-        - InputArtifacts: []
-          Name: Source
-          ActionTypeId:
-            Category: Source
-            Owner: AWS
-            Version: '1'
-            Provider: CodeCommit
-          OutputArtifacts:
-          - Name: MyApp
-          Configuration:
-            BranchName:
-              Ref: RepositoryBranch
-            RepositoryName:
-              Ref: RepositoryName
-          RunOrder: 1
-      - Name: Beta
-        Actions:
-        - InputArtifacts:
-          - Name: MyApp
-          Name: EbApp
-          ActionTypeId:
-            Category: Deploy
-            Owner: AWS
-            Version: '1'
-            Provider: ElasticBeanstalk
-          OutputArtifacts: []
-          Configuration:
-            ApplicationName:
-              Ref: nodeApplication
-            EnvironmentName:
-              Ref: nodeEnvironment
-          RunOrder: 1
+        - Name: Source
+          Actions:
+            - InputArtifacts: []
+              Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: CodeCommit
+              OutputArtifacts:
+                - Name: MyApp
+              Configuration:
+                BranchName:
+                  Ref: RepositoryBranch
+                RepositoryName:
+                  Ref: RepositoryName
+              RunOrder: 1
+        - Name: Beta
+          Actions:
+            - InputArtifacts:
+                - Name: MyApp
+              Name: EbApp
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: ElasticBeanstalk
+              OutputArtifacts: []
+              Configuration:
+                ApplicationName:
+                  Ref: nodeApplication
+                EnvironmentName:
+                  Ref: nodeEnvironment
+              RunOrder: 1
       ArtifactStore:
         Type: S3
         Location: !Ref ArtifactBucket
@@ -409,21 +405,21 @@ Outputs:
   AppURL:
     Value:
       Fn::Join:
-      - ''
-      - - http://
-        - Fn::GetAtt:
-          - nodeEnvironment
-          - EndpointURL
-        - "/"
+        - ""
+        - - http://
+          - Fn::GetAtt:
+              - nodeEnvironment
+              - EndpointURL
+          - "/"
     Description: URL for the working Node application
   CodePipelineURL:
     Value:
       Fn::Join:
-      - ''
-      - - https://console.aws.amazon.com/codepipeline/home?region=
-        - Ref: AWS::Region
-        - "#/view/"
-        - Ref: CodePipelineStack
+        - ""
+        - - https://console.aws.amazon.com/codepipeline/home?region=
+          - Ref: AWS::Region
+          - "#/view/"
+          - Ref: CodePipelineStack
     Description: Pipeline URL
   nodeApplication:
     Value:
