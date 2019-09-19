@@ -1,4 +1,3 @@
----
 AWSTemplateFormatVersion: 2010-09-09
 
 # A CloudFormation template to create/configure an AWS Fargate Cluster, Application Load Balancer (ALB),
@@ -6,9 +5,18 @@ AWSTemplateFormatVersion: 2010-09-09
 # you can specify a domain name and/or an AWS Certificate Manager ARN can be passed if you want to
 # enable TLS on the ALB. If you want to create the DNS alias to the ALB, your DNS must be hosted in
 # Amazon Route 53.
+#
+# From the Startup Kit Templates, this template requires the name of an existing vpc.cfn.yml stack as
+# a parameter.
+#
+# If you pass the optional database stack name, it pulls the values for the DB endpoint and username
+# and sets them as environment variables in the container.
+#
+# The service creates CloudWatch Alarms to monitor CPU utilization in order to determine container
+# counts (up and down), but other metrics may be more important in your system.
+# See: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service_autoscaling_tutorial.html
 
-
-Description: SASKV5N Fargate
+Description: ECS Fargate + CodePipline
 
 Parameters:
   # NetworkStackName:
