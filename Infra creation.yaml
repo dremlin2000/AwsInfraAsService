@@ -1,7 +1,30 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: Deploy a VPC
+Description: Deploy Infrastructure
 
 Parameters:
+  SSHFrom:
+    Description: Limit SSH access to bastion hosts to a CIDR IP block
+    Type: String
+    MinLength: 9
+    MaxLength: 18
+    Default: 0.0.0.0/0
+
+  ELBIngressPort:
+    Description: The ELB ingress port used by security groups
+    Type: Number
+    MinValue: 0
+    MaxValue: 65535
+    ConstraintDescription: TCP ports must be between 0 - 65535
+    Default: 80
+
+  AppIngressPort:
+    Description: The application ingress port used by security groups
+    Type: Number
+    MinValue: 0
+    MaxValue: 65535
+    ConstraintDescription: TCP ports must be between 0 - 65535
+    Default: 80
+
   SingleNatGateway:
     Description: Set to true to only install one NAT gateway
     Type: String
@@ -20,17 +43,18 @@ Resources:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: Lab VPC
+          Value: !Sub "${AWS::StackName}-VPC"
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: Lab Internet Gateway
+          Value: !Sub "${AWS::StackName}-Internet Gateway"
 
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -49,7 +73,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Public Subnet 1
+          Value: !Sub "${AWS::StackName}-Public Subnet 1"
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
@@ -62,7 +86,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Public Subnet 2
+          Value: !Sub "${AWS::StackName}-Public Subnet 2"
 
   PublicSubnet3:
     Type: AWS::EC2::Subnet
@@ -75,7 +99,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Public Subnet 3
+          Value: !Sub "${AWS::StackName}-Public Subnet 3"
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
@@ -87,7 +111,7 @@ Resources:
         - !GetAZs ""
       Tags:
         - Key: Name
-          Value: Private Subnet 1
+          Value: !Sub "${AWS::StackName}-Private Subnet 1"
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
@@ -98,7 +122,7 @@ Resources:
         - !GetAZs ""
       Tags:
         - Key: Name
-          Value: Private Subnet 2
+          Value: !Sub "${AWS::StackName}-Private Subnet 2"
   PrivateSubnet3:
     Type: AWS::EC2::Subnet
     Properties:
@@ -109,7 +133,7 @@ Resources:
         - !GetAZs ""
       Tags:
         - Key: Name
-          Value: Private Subnet 3
+          Value: !Sub "${AWS::StackName}-Private Subnet 3"
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
@@ -299,6 +323,68 @@ Resources:
     Properties:
       SubnetId: !Ref PrivateSubnet3
       RouteTableId: !Ref NatRouteTable3
+
+  #Security groups
+  ELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ELB SG - Enable HTTP/HTTPs ingress
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ELBIngressPort
+          ToPort: !Ref ELBIngressPort
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-ELBSecurityGroup"
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Application SG - Enable HTTP traffic from load balancer only and SSH traffic from bastions
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref AppIngressPort
+          ToPort: !Ref AppIngressPort
+          SourceSecurityGroupId:
+            Ref: ELBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId:
+            Ref: BastionSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-AppSecurityGroup"
+
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Bastion SG - Enable access to the bastion host
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - CidrIp: !Ref SSHFrom
+          IpProtocol: tcp
+          ToPort: 22
+          FromPort: 22
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          ToPort: 80
+          FromPort: 80
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          ToPort: 443
+          FromPort: 443
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: udp
+          ToPort: 123
+          FromPort: 123
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-BastionSecurityGroup"
 Outputs:
   VPC:
     Description: VPC
