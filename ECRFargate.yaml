@@ -286,21 +286,27 @@ Resources:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
 
-  FargateServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Path: /
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-        Action:
-          - iam:CreateServiceLinkedRole
-          - iam:PutRolePolicy
-        Resource: arn:aws:iam::*:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS*
-        Condition:
-          StringLike:
-            iam:AWSServiceName: ecs.amazonaws.com
+  # FargateServiceRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     Path: /
+  #     AssumeRolePolicyDocument:
+  #       Version: 2012-10-17
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Service: ecs.amazonaws.com
+  #           Action: sts:AssumeRole
+  #     Policies:
+  #       - PolicyName: root
+  #         PolicyDocument:
+  #           Version: 2012-10-17
+  #           Statement:
+  #             - Resource: "*"
+  #               Effect: Allow
+  #               Action:
+  #                 - iam:CreateServiceLinkedRole
+  #                 - iam:PutRolePolicy
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -389,8 +395,8 @@ Resources:
                   - echo Pushing the Docker image...
                   - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
                   - printf '[{"name":"${TaskDefinitionName}","imageUri":"%s"}]' $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG > build.json
-              artifacts:
-                files: build.json
+            artifacts:
+              files: build.json
           - TaskDefinitionName: !Ref DefaultFargateTaskDefinition
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
@@ -414,7 +420,7 @@ Resources:
           #   Value: !Ref GitSourceRepo
           # - Name: REPOSITORY_BRANCH
           #   Value: !Ref GitBranch
-      Name: !Ref AWS::StackName
+      Name: !Sub "${AWS::StackName}-CodeBuild"
       ServiceRole: !Ref CodeBuildServiceRole
       VpcConfig:
         # VpcId:
@@ -833,7 +839,7 @@ Resources:
           #   - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet1ID
           #   - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet2ID
           Subnets: !Ref PrivateSubnets
-      Role: !Ref FargateServiceRole
+      # Role: !Ref FargateServiceRole
     DependsOn:
       - FargateEcsCluster
       - DefaultFargateTaskDefinition
