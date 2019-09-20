@@ -1,3 +1,4 @@
+---
 AWSTemplateFormatVersion: 2010-09-09
 
 # A CloudFormation template to create/configure an AWS Fargate Cluster, Application Load Balancer (ALB),
@@ -15,6 +16,9 @@ AWSTemplateFormatVersion: 2010-09-09
 # The service creates CloudWatch Alarms to monitor CPU utilization in order to determine container
 # counts (up and down), but other metrics may be more important in your system.
 # See: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service_autoscaling_tutorial.html
+#
+# This template is released under Apache Version 2.0, and can be forked, copied, modified,
+# customized, etc. to match your application/system requirements.
 
 Description: ECS Fargate + CodePipline
 
@@ -351,36 +355,49 @@ Resources:
             version: 0.2
             phases:
               install:
-                commands:
-                  - apt-get update && apt-get -y install python-pip && pip install --upgrade python && pip install --upgrade awscli
+                runtime-versions:
+                  docker: 18
               pre_build:
-                  commands:
-                  - printenv
-                  - TAG="$REPOSITORY_NAME.$REPOSITORY_BRANCH.$ENVIRONMENT_NAME.$(date +%Y-%m-%d.%H.%M.%S).$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)"
-                  - $(aws ecr get-login --no-include-email)
+                commands:
+                  - echo Logging in to Amazon ECR...
+                  - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)
               build:
                 commands:
-                  - docker build --tag $REPOSITORY_URI:$TAG .
+                  - echo Build started on `date`
+                  - echo Building the Docker image...          
+                  - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+                  - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG      
               post_build:
                 commands:
-                  - docker push $REPOSITORY_URI:$TAG
-                  - printf '[{"name":"${ServiceName}","imageUri":"%s"}]' $REPOSITORY_URI:$TAG > build.json
-            artifacts:
-              files: build.json
-          - ServiceName: !Ref GitSourceRepo
+                  - echo Build completed on `date`
+                  - echo Pushing the Docker image...
+                  - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+                  - printf '[{"name":"${TaskDefinitionName}","imageUri":"%s"}]' $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG > build.json
+              artifacts:
+                files: build.json
+          - TaskDefinitionName: !Ref DefaultFargateTaskDefinition
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
         Type: LINUX_CONTAINER
         Image: !Ref CodeBuildDockerImage
         EnvironmentVariables:
-          - Name: REPOSITORY_URI
-            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EcrDockerRepository}
-          - Name: ENVIRONMENT_NAME
-            Value: !Ref EnvironmentName
-          - Name: REPOSITORY_NAME
-            Value: !Ref GitSourceRepo
-          - Name: REPOSITORY_BRANCH
-            Value: !Ref GitBranch
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: IMAGE_REPO_NAME
+            Value: !Ref EcrDockerRepository
+          - Name: IMAGE_TAG
+            Value: latest
+
+          # - Name: REPOSITORY_URI
+          #   Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EcrDockerRepository}
+          # - Name: ENVIRONMENT_NAME
+          #   Value: !Ref EnvironmentName
+          # - Name: REPOSITORY_NAME
+          #   Value: !Ref GitSourceRepo
+          # - Name: REPOSITORY_BRANCH
+          #   Value: !Ref GitBranch
       Name: !Ref AWS::StackName
       ServiceRole: !Ref CodeBuildServiceRole
       VpcConfig:
