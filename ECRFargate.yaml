@@ -101,6 +101,11 @@ Parameters:
     MaxLength: 255
     ConstraintDescription: Value must be between 1 and 255 characters
 
+  DockerfilePath:
+    Type: String
+    Description: Dockerfile path. Do NOT specifile Dockerfile name at the end. Specify relative path to Dockerfile, e.g. MyService/MyDockerfileIsHere
+    Default: "WebAppDocker"
+
   GitSourceRepo:
     Type: String
     Description: CodeCommit or GitHub source repository - must contain a Dockerfile in the base
@@ -259,6 +264,8 @@ Conditions:
 
   IsLBAlarmEnabled: !Equals [!Ref EnableLBAlarm, true]
 
+  IsDockerfilePathSpecified: !Not [!Equals [!Ref DockerfilePath, ""]]
+
 Resources:
   AppSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -387,17 +394,24 @@ Resources:
                 commands:
                   - echo Build started on `date`
                   - echo Building the Docker image...          
-                  - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+                  - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG ${DockerfilePathParam}.
                   - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG      
               post_build:
                 commands:
                   - echo Build completed on `date`
                   - echo Pushing the Docker image...
                   - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
-                  - printf '[{"name":"${TaskDefinitionName}","imageUri":"%s"}]' $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG > build.json
+                  - printf '[{"name":"${ContainerName}","imageUri":"%s"}]' $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG > build.json
             artifacts:
               files: build.json
-          - TaskDefinitionName: !Ref DefaultFargateTaskDefinition
+          - ContainerName: !Ref GitSourceRepo
+            DockerfilePathParam:
+              !If
+                - IsDockerfilePathSpecified
+                - !Sub
+                  - "-f ${DockerfilePath}/Dockerfile "
+                  - DockerfilePath: !Ref DockerfilePath
+                - ""
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
         Type: LINUX_CONTAINER
@@ -411,15 +425,6 @@ Resources:
             Value: !Ref EcrDockerRepository
           - Name: IMAGE_TAG
             Value: latest
-
-          # - Name: REPOSITORY_URI
-          #   Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EcrDockerRepository}
-          # - Name: ENVIRONMENT_NAME
-          #   Value: !Ref EnvironmentName
-          # - Name: REPOSITORY_NAME
-          #   Value: !Ref GitSourceRepo
-          # - Name: REPOSITORY_BRANCH
-          #   Value: !Ref GitBranch
       Name: !Sub "${AWS::StackName}-CodeBuild"
       ServiceRole: !Ref CodeBuildServiceRole
       VpcConfig:
