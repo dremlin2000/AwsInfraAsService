@@ -1,4 +1,3 @@
----
 AWSTemplateFormatVersion: 2010-09-09
 
 # A CloudFormation template to create/configure an AWS Fargate Cluster, Application Load Balancer (ALB),
@@ -17,8 +16,6 @@ AWSTemplateFormatVersion: 2010-09-09
 # counts (up and down), but other metrics may be more important in your system.
 # See: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service_autoscaling_tutorial.html
 #
-# This template is released under Apache Version 2.0, and can be forked, copied, modified,
-# customized, etc. to match your application/system requirements.
 
 Description: ECS Fargate + CodePipline
 
@@ -104,6 +101,7 @@ Parameters:
   DockerfilePath:
     Type: String
     Description: Dockerfile path. Do NOT specifile Dockerfile name at the end. Specify relative path to Dockerfile, e.g. MyService/MyDockerfileIsHere
+    AllowedPattern: .+
     Default: "WebAppDocker"
 
   GitSourceRepo:
@@ -416,6 +414,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Type: LINUX_CONTAINER
         Image: !Ref CodeBuildDockerImage
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: AWS_DEFAULT_REGION
             Value: !Ref AWS::Region
@@ -439,6 +438,11 @@ Resources:
         Subnets: !Ref PrivateSubnets
         SecurityGroupIds:
           - !Ref AppSecurityGroup
+      Cache: 
+        Location: LOCAL
+        Modes:
+          - LOCAL_DOCKER_LAYER_CACHE
+        Type: LOCAL
 
   CodePipelineServiceRole:
     Type: AWS::IAM::Role
