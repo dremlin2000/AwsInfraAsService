@@ -1,23 +1,9 @@
+---
 AWSTemplateFormatVersion: 2010-09-09
 
-# A CloudFormation template to create/configure an AWS Fargate Cluster, Application Load Balancer (ALB),
-# Amazon Elastic Container Registry (ECR), AWS CodePipeline and Service based on parameters. Optionally,
-# you can specify a domain name and/or an AWS Certificate Manager ARN can be passed if you want to
-# enable TLS on the ALB. If you want to create the DNS alias to the ALB, your DNS must be hosted in
-# Amazon Route 53.
-#
-# From the Startup Kit Templates, this template requires the name of an existing vpc.cfn.yml stack as
-# a parameter.
-#
-# If you pass the optional database stack name, it pulls the values for the DB endpoint and username
-# and sets them as environment variables in the container.
-#
-# The service creates CloudWatch Alarms to monitor CPU utilization in order to determine container
-# counts (up and down), but other metrics may be more important in your system.
-# See: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service_autoscaling_tutorial.html
-#
+# A CloudFormation template to deploy an additional service to Fargate. This requires an existing cluster deployed.
 
-Description: ECS Fargate + CodePipline
+Description: Fargate Service
 
 Parameters:
   NetworkStackName:
@@ -27,57 +13,35 @@ Parameters:
     MaxLength: 255
     AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
 
-  # VPCId:
-  #   Description: Choose VPC
-  #   Type: AWS::EC2::VPC::Id
-  #   AllowedPattern: .+
-
-  # PrivateSubnets:
-  #   Description: Private subnets
-  #   Type: List<AWS::EC2::Subnet::Id>
-  #   AllowedPattern: .+
-
-  # PublicSubnets:
-  #   Description: Public subnets
-  #   Type: List<AWS::EC2::Subnet::Id>
-  #   AllowedPattern: .+
-
-  # AppIngressPort:
-  #   Description: The application ingress port used by security groups
-  #   Type: Number
-  #   MinValue: 0
-  #   MaxValue: 65535
-  #   ConstraintDescription: TCP ports must be between 0 - 65535
-  #   Default: 80
-
-  # LoadBalancerSecurityGroup:
-  #   Description: Choose Load Balancer Security Group
-  #   Type: AWS::EC2::SecurityGroup::Id
-  #   AllowedPattern: .+
-
-  # AppSecurityGroup:
-  #   Description: Choose Application Security Group
-  #     Type: AWS::EC2::SecurityGroup::Id
-  #     AllowedPattern: .+
-
   DatabaseStackName:
     Type: String
     Description: Name of an optional active Startup Kit CloudFormation stack that contains database resources
     Default: ""
 
-  HostedZoneName:
+  FargateStackName:
     Type: String
-    Description: The Amazon Route 53 Hosted Zone Name for the optional load balancer alias record - do not include a period at the end
-    Default: ""
-    AllowedPattern: "(^$|^((?!-)[A-Za-z0-9-]{1,63}(?<!-)\\.)+[A-Za-z]{2,6}$)" # Allow for a blank or a domain name
-    ConstraintDescription: Please enter a valid Route 53 Hosted Zone Name
+    Description: Name of an active Startup Kit CloudFormation stack that contains Fargate resources
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
 
-  LoadBalancerDomainName:
+  EnvironmentName:
     Type: String
-    Description: Domain name to create an Amazon Route 53 alias record for the load balancer
-    Default: ""
-    AllowedPattern: "(^$|^((?!-)[A-Za-z0-9-]{1,63}(?<!-)\\.)+[A-Za-z]{2,6}$)" # Allow for a blank or a domain name
-    ConstraintDescription: Please enter a valid domain name
+    Description: Environment name - dev or prod
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    ConstraintDescription: Specify either dev or prod
+
+  RegisterServiceWithAlb:
+    Default: true
+    Type: String
+    Description: Set to false to disable registering with the ALB (e.g., backend services without a web interface)
+    ConstraintDescription: Only true or false are allowed
+    AllowedValues:
+      - true
+      - false
 
   AppProtocol:
     Type: String
@@ -88,12 +52,30 @@ Parameters:
       - HTTPS
     ConstraintDescription: Specify either HTTTP or HTTPS
 
-  SSLCertificateArn:
+  ServiceUrlPath:
     Type: String
-    Description: The SSL/TLS certificate ARN
-    MinLength: 0
-    MaxLength: 2048
+    Description: The optional URL path for the service (e.g., /test). Either an URL path or hostname is required if you register with an ALB
     Default: ""
+
+  HostedZoneName:
+    Type: String
+    Description: The Amazon Route 53 Hosted Zone Name for the optional load balancer alias record for the service - do not include a period at the end
+    Default: ""
+    AllowedPattern: "(^$|^((?!-)[A-Za-z0-9-]{1,63}(?<!-)\\.)+[A-Za-z]{2,6}$)" # Allow for a blank or a domain name
+    ConstraintDescription: Please enter a valid Route 53 Hosted Zone Name
+
+  ServiceHostname:
+    Type: String
+    Description: The optional URL path for the service (e.g., foo.bar.com). Either an URL path or hostname is required if you register with an ALB
+    Default: ""
+
+  ServiceLBListenerPriority:
+    Type: Number
+    Description: The service load balancer listener priority - must be unique for each service if ALB is enabled
+    Default: 2
+    MinValue: 2
+    MaxValue: 50000
+    ConstraintDescription: Number must be between 1 and 50,000
 
   HealthCheckPath:
     Type: String
@@ -107,12 +89,12 @@ Parameters:
     Type: String
     Description: Dockerfile path. Do NOT specify Dockerfile name at the end. Specify relative path to Dockerfile in the repository, e.g. MyService/MyDockerfileIsHere. If Dokerfile is located in the root path of the reporitory then just leave this parameter empty.
     AllowedPattern: .+
-    Default: "WebAppDocker"
+    Default: "WebAppDockerTest2"
 
   GitSourceRepo:
     Type: String
     Description: CodeCommit or GitHub source repository - must contain a Dockerfile in the base
-    Default: WebAppDocker
+    Default: "WebAppDockerTest2"
 
   GitBranch:
     Type: String
@@ -122,7 +104,7 @@ Parameters:
   GitHubToken:
     Type: String
     NoEcho: true
-    Description: "GitHub API token - see: https://github.com/blog/1509-personal-api-tokens"
+    Description: "GitHub API token - leave blank if using CodeCommit - see: https://github.com/blog/1509-personal-api-tokens"
 
   GitHubUser:
     Type: String
@@ -134,11 +116,10 @@ Parameters:
 
   SeedDockerImage:
     Type: String
-    # Default: registry.hub.docker.com/library/nginx:1.13
-    Default: mcr.microsoft.com/dotnet/core/aspnet:2.1-stretch-slim
+    Default: registry.hub.docker.com/library/nginx:1.13
     Description: Initial image before CodePipeline is executed. Existing application images in ECR should override this parameter
 
-  DefaultContainerCpu:
+  ContainerCpu:
     Type: Number
     Description: "Amount of CPU for the container - options available: https://aws.amazon.com/fargate/pricing/"
     Default: 256
@@ -146,7 +127,7 @@ Parameters:
     MaxValue: 4096
     ConstraintDescription: "Value must be between 256 and 4096 - see: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html#task_size"
 
-  DefaultContainerMemory:
+  ContainerMemory:
     Type: Number
     Description: "Amount of memory for the container - options available: https://aws.amazon.com/fargate/pricing/"
     Default: 512
@@ -154,14 +135,14 @@ Parameters:
     MaxValue: 30720
     ConstraintDescription: "Value must be between 512 and 30720 - see: https://aws.amazon.com/fargate/pricing/"
 
-  # Scaling params
-  DefaultServiceScaleEvaluationPeriods:
+  # CPU alarm parameters
+  CpuAlarmEvaluationPeriods:
     Description: The number of periods over which data is compared to the specified threshold
     Type: Number
     Default: 2
     MinValue: 2
 
-  DefaultServiceCpuScaleOutThreshold:
+  CpuScaleOutThreshold:
     Type: Number
     Description: Average CPU value to trigger auto scaling out
     Default: 50
@@ -169,7 +150,7 @@ Parameters:
     MaxValue: 100
     ConstraintDescription: Value must be between 0 and 100
 
-  DefaultServiceCpuScaleInThreshold:
+  CpuScaleInThreshold:
     Type: Number
     Description: Average CPU value to trigger auto scaling in
     Default: 25
@@ -177,14 +158,15 @@ Parameters:
     MaxValue: 100
     ConstraintDescription: Value must be between 0 and 100
 
-  DefaultTaskMinContainerCount:
+  # Auto scaling container counts
+  TaskMinContainerCount:
     Type: Number
     Description: Minimum number of containers to run for the service
     Default: 1
     MinValue: 1
     ConstraintDescription: Value must be at least one
 
-  DefaultTaskMaxContainerCount:
+  TaskMaxContainerCount:
     Type: Number
     Description: Maximum number of containers to run for the service when auto scaling out
     Default: 2
@@ -211,112 +193,37 @@ Parameters:
     ConstraintDescription: Value must be between 1 and 100
     Default: 7
 
-  EnvironmentName:
-    Type: String
-    Description: Environment name - dev or prod
-    Default: dev
-    AllowedValues:
-      - dev
-      - prod
-    ConstraintDescription: Specify either dev or prod
-
-  LoadBalancerAlarmEvaluationPeriods:
-    Description: The number of periods over which data is compared to the specified threshold
-    Type: Number
-    Default: 2
-    MinValue: 2
-    ConstraintDescription: Must be at least two
-
-  LoadBalancerAlarmEvaluationPeriodSeconds:
-    Description: The time over which the specified statistic is applied. Specify time in seconds, in multiples of 60.
-    Type: Number
-    Default: 300
-    MinValue: 60
-    ConstraintDescription: Must be at least 60 seconds
-
-  LoadBalancerLatencySeconds:
-    Description: LoadBalancer latency threshold, in seconds
-    Type: Number
-    Default: 2
-    MinValue: 1
-    ConstraintDescription: Must be at least one second
-
-  EnableLBAlarm:
-    Description: Set to true to enable load balancer latency alarm
-    Type: String
-    ConstraintDescription: Value must be true or false
-    Default: false
-    AllowedValues:
-      - true
-      - false
 
 Conditions:
-  IsTlsEnabled: !Not [!Equals [!Ref SSLCertificateArn, ""]]
 
-  IsDbStackSet: !Not [!Equals [!Ref DatabaseStackName, ""]]
-
-  CreateRoute53Record: !And
-    - !Not [!Equals [!Ref LoadBalancerDomainName, ""]]
-    - !Not [!Equals [!Ref HostedZoneName, ""]]
+  IsDbStackSet: !Not [ !Equals [ !Ref DatabaseStackName, "" ] ]
 
   IsGitHub: !And
-    - !Not [!Equals [!Ref GitHubToken, ""]]
-    - !Not [!Equals [!Ref GitHubUser, ""]]
+    - !Not [ !Equals [ !Ref GitHubToken, "" ] ]
+    - !Not [ !Equals [ !Ref GitHubUser, "" ] ]
 
-  IsCodeCommit: !Not [Condition: IsGitHub]
+  IsCodeCommit: !Not [ Condition: IsGitHub ]
 
-  IsLBAlarmEnabled: !Equals [!Ref EnableLBAlarm, true]
+  AddServiceToAlb: !Equals [ !Ref RegisterServiceWithAlb, true ]
+
+  CreateRoute53Record: !And
+    - !Not [ !Equals [ !Ref ServiceHostname, "" ] ]
+    - !Not [ !Equals [ !Ref HostedZoneName, "" ] ]
+    - Condition: AddServiceToAlb
+
+  IsUrlPathRouting: !And
+    - !Not [ !Equals [ !Ref ServiceUrlPath, "" ] ]
+    - Condition: AddServiceToAlb
+
+  DoNotAddServiceToAlb: !Equals [ !Ref RegisterServiceWithAlb, false ]
 
   IsDockerfilePathSpecified: !Not [!Equals [!Ref DockerfilePath, ""]]
 
 Resources:
-  # AppSecurityGroup:
-  #   Type: AWS::EC2::SecurityGroup
-  #   Properties:
-  #     GroupDescription: Enable access from ELB to app
-  #     VpcId: !Ref VPCId
-  #     SecurityGroupIngress:
-  #       - SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
-  #         IpProtocol: tcp
-  #         ToPort: !Ref AppIngressPort
-  #         FromPort: !Ref AppIngressPort
-  #       # - SourceSecurityGroupId: !Ref BastionSecurityGroup
-  #       #   IpProtocol: tcp
-  #       #   ToPort: 22
-  #       #   FromPort: 22
-  #     Tags:
-  #       - Key: Name
-  #         Value: !Sub "${AWS::StackName}-AppSecurityGroup"
-
-  DefaultContainerBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Delete
 
   CodePipelineArtifactBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
-
-  # FargateServiceRole:
-  #   Type: AWS::IAM::Role
-  #   Properties:
-  #     Path: /
-  #     AssumeRolePolicyDocument:
-  #       Version: 2012-10-17
-  #       Statement:
-  #         - Effect: Allow
-  #           Principal:
-  #             Service: ecs.amazonaws.com
-  #           Action: sts:AssumeRole
-  #     Policies:
-  #       - PolicyName: root
-  #         PolicyDocument:
-  #           Version: 2012-10-17
-  #           Statement:
-  #             - Resource: "*"
-  #               Effect: Allow
-  #               Action:
-  #                 - iam:CreateServiceLinkedRole
-  #                 - iam:PutRolePolicy
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -358,7 +265,7 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:GetObjectVersion
-              - Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${EcrDockerRepository}
+              - Resource: !GetAtt EcrDockerRepository.Arn
                 Effect: Allow
                 Action:
                   - ecr:GetDownloadUrlForLayer
@@ -437,13 +344,8 @@ Resources:
         Subnets:
           - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet1ID
           - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet2ID
-          - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet3ID
         SecurityGroupIds:
-          - Fn::ImportValue: !Sub ${NetworkStackName}-AppSecurityGroupID
-        # VpcId: !Ref VPCId
-        # Subnets: !Ref PrivateSubnets
-        # SecurityGroupIds:
-        #   - !Ref AppSecurityGroup
+          - Fn::ImportValue: !Sub ${NetworkStackName}-AppSecurityGroupID     
       Cache: 
         Location: LOCAL
         Modes:
@@ -490,7 +392,6 @@ Resources:
                   - s3:GetBucketVersioning
     DependsOn:
       - CodePipelineArtifactBucket
-      - FargateEcsCluster
 
   # This CodePipeline is used for CodeCommit repos. It triggers on a commit to the Git branch passed,
   # builds the Docker image and then deploys the container in the Fargate Cluster. CodePipeline can support N stages.
@@ -542,21 +443,19 @@ Resources:
                 Version: 1
                 Provider: ECS
               Configuration:
-                ClusterName: !Ref FargateEcsCluster
-                ServiceName: !GetAtt DefaultFargateService.Name
+                ClusterName:
+                  Fn::ImportValue: !Sub ${FargateStackName}-FargateEcsClusterName
+                ServiceName: !If [ AddServiceToAlb, !GetAtt ServiceWithAlb.Name, !GetAtt ServiceWithoutAlb.Name ]
                 FileName: build.json
               InputArtifacts:
                 - Name: BuildOutput
               RunOrder: 1
     DependsOn:
       - CodePipelineArtifactBucket
-      - CodeBuildProject
-      - CodePipelineServiceRole
-      - DefaultFargateService
 
-  # This CodePipeline is used for GitHub based repos. It triggers on a commit to the Git branch passed,
-  # builds the Docker image and then deploys the container in the Fargate Cluster. CodePipeline can support N stages.
-  # For example, you may want to add a stage to test your build and/or container.
+  # This CodePipeline triggers on a commit to the Git branch passed, builds the Docker image
+  # and then deploys the container in the Fargate Cluster. CodePipeline can support N stages. For
+  # example, you may want to add a stage to test your build and/or container.
   CodePipelineGitHub:
     Type: AWS::CodePipeline::Pipeline
     Condition: IsGitHub
@@ -606,8 +505,9 @@ Resources:
                 Version: 1
                 Provider: ECS
               Configuration:
-                ClusterName: !Ref FargateEcsCluster
-                ServiceName: !GetAtt DefaultFargateService.Name
+                ClusterName:
+                  Fn::ImportValue: !Sub ${FargateStackName}-FargateEcsClusterName
+                ServiceName: !If [ AddServiceToAlb, !GetAtt ServiceWithAlb.Name, !GetAtt ServiceWithoutAlb.Name ]
                 FileName: build.json
               InputArtifacts:
                 - Name: BuildOutput
@@ -616,7 +516,6 @@ Resources:
       - CodePipelineArtifactBucket
       - CodeBuildProject
       - CodePipelineServiceRole
-      - DefaultFargateService
 
   # Simple Amazon ECR Lifecycle Policies to try and reduce storage costs
   # See: https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html
@@ -656,94 +555,14 @@ Resources:
             MaxTaggedContainerImagesToRetain: !Ref MaxTaggedContainerImagesToRetain
             EnvironmentName: !Ref EnvironmentName
 
-  # In order to avoid error message "Unable to assume the service linked role. Please verify that the ECS service linked role exists.", create ServiceLinked Role explicitly
-  EcsServiceLinkedRole:
-    Type: "AWS::IAM::ServiceLinkedRole"
-    Properties:
-      AWSServiceName: "ecs.amazonaws.com"
-      Description: "Role to enable Amazon ECS to manage your cluster."
-      
-  FargateEcsCluster:
-    Type: AWS::ECS::Cluster
-    Properties:
-      ClusterName: !Ref AWS::StackName
-    DependsOn: EcsServiceLinkedRole
-
-  # The ALB lives in two public subnets. See the existing vpc.cfn.yml stack
-  # for ELB/ALB and application security groups which define ingress ports.
-  ApplicationLoadBalancer:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Subnets:
-        - Fn::ImportValue: !Sub ${NetworkStackName}-PublicSubnet1ID
-        - Fn::ImportValue: !Sub ${NetworkStackName}-PublicSubnet2ID
-        - Fn::ImportValue: !Sub ${NetworkStackName}-PublicSubnet3ID
-      SecurityGroups:
-        - Fn::ImportValue: !Sub ${NetworkStackName}-ELBSecurityGroupID
-      # Subnets: !Ref PublicSubnets
-      # SecurityGroups:
-      #   - !Ref LoadBalancerSecurityGroup
-      Tags:
-        - Key: Stack
-          Value: !Ref AWS::StackName
-        - Key: Environment
-          Value: !Ref EnvironmentName
-        - Key: FargateCluster
-          Value: !Ref FargateEcsCluster
-
-  # AlbRoute53Record:
-  #   Type: AWS::Route53::RecordSet
-  #   Condition: CreateRoute53Record
-  #   Properties:
-  #     Name: !Ref LoadBalancerDomainName
-  #     HostedZoneName: !Sub ${HostedZoneName}.
-  #     Type: A
-  #     AliasTarget:
-  #       HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
-  #       DNSName: !GetAtt ApplicationLoadBalancer.DNSName
-  #   DependsOn: ApplicationLoadBalancer
-
-  # The health checks can be further tuned if your requirements differ
-  DefaultTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      VpcId:
-        Fn::ImportValue: !Sub ${NetworkStackName}-VpcID
-      # VpcId: !Ref VPCId
-      Port:
-        Fn::ImportValue: !Sub ${NetworkStackName}-AppIngressPort
-      # Port: 80
-      Protocol: !Ref AppProtocol
-      Matcher:
-        HttpCode: 200
-      HealthCheckIntervalSeconds: 10
-      HealthCheckPath: !Ref HealthCheckPath
-      HealthCheckProtocol: !Ref AppProtocol
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      TargetGroupAttributes:
-        - Key: deregistration_delay.timeout_seconds
-          Value: 300
-      TargetType: ip
-      Tags:
-        - Key: Repository
-          Value: !Ref GitSourceRepo
-        - Key: Branch
-          Value: !Ref GitBranch
-        - Key: Stack
-          Value: !Ref AWS::StackName
-        - Key: Environment
-          Value: !Ref EnvironmentName
-    DependsOn: ApplicationLoadBalancer
-
-  # The namespace in Amazon CloudWatch Logs - see https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogsConcepts.html
-  DefaultLogGroup:
+    # The namespace in Amazon CloudWatch Logs - see https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogsConcepts.html
+  LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /fargate/${AWS::StackName}/${GitSourceRepo}/${GitBranch}/${EnvironmentName}
       RetentionInDays: !Ref ContainerLogRetentionInDays
 
-  DefaultTaskRole:
+  TaskRole:
     Type: AWS::IAM::Role
     Properties:
       Path: /
@@ -754,17 +573,8 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: default-s3-bucket
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: s3:*
-                Resource: !GetAtt DefaultContainerBucket.Arn
-    DependsOn: DefaultContainerBucket
 
-  DefaultTaskExecutionRole:
+  TaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       Path: /
@@ -778,23 +588,22 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-  DefaultFargateTaskDefinition:
+  TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: !Ref AWS::StackName
       RequiresCompatibilities:
         - FARGATE
-      Cpu: !Ref DefaultContainerCpu
-      Memory: !Ref DefaultContainerMemory
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
       NetworkMode: awsvpc
-      TaskRoleArn: !GetAtt DefaultTaskRole.Arn
-      ExecutionRoleArn: !GetAtt DefaultTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       ContainerDefinitions:
         - Name: !Ref GitSourceRepo
           Image: !Ref SeedDockerImage
           Essential: true
           PortMappings:
-            # - ContainerPort: 80
             - ContainerPort:
                 Fn::ImportValue: !Sub ${NetworkStackName}-AppIngressPort
 
@@ -802,77 +611,73 @@ Resources:
           # should be stored in AWS Systems Manager Parameter Store.
           # See: https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-paramstore.html
           Environment:
-            - Name: BUCKET_NAME
-              Value: !Ref DefaultContainerBucket
             - Name: ENVIRONMENT_NAME
               Value: !Ref EnvironmentName
             - Name: DATABASE_ENDPOINT
-              Value:
-                !If [
-                  IsDbStackSet,
-                  "Fn::ImportValue": !Sub "${DatabaseStackName}-DatabaseURL",
-                  "",
-                ]
+              Value: !If [ IsDbStackSet, "Fn::ImportValue": !Sub "${DatabaseStackName}-DatabaseURL", "" ]
             - Name: DATABASE_USER
-              Value:
-                !If [
-                  IsDbStackSet,
-                  "Fn::ImportValue": !Sub "${DatabaseStackName}-DatabaseUser",
-                  "",
-                ]
+              Value: !If [ IsDbStackSet, "Fn::ImportValue": !Sub "${DatabaseStackName}-DatabaseUser", "" ]
             - Name: LOAD_BALANCER_DNS
               Value:
-                !If [
-                  CreateRoute53Record,
-                  !Ref LoadBalancerDomainName,
-                  !GetAtt ApplicationLoadBalancer.DNSName,
-                ]
+                Fn::ImportValue: !Sub ${FargateStackName}-ApplicationLoadBalancerDnsName
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-region: !Ref AWS::Region
-              awslogs-group: !Ref DefaultLogGroup
+              awslogs-group: !Ref LogGroup
               awslogs-stream-prefix: !Ref GitSourceRepo
     DependsOn:
-      - DefaultContainerBucket
-      - DefaultLogGroup
-      - DefaultTaskExecutionRole
+      - LogGroup
+      - TaskExecutionRole
 
-  DefaultFargateService:
+  ServiceWithoutAlb:
     Type: AWS::ECS::Service
+    Condition: DoNotAddServiceToAlb
     Properties:
-      Cluster: !Ref FargateEcsCluster
+      Cluster:
+        Fn::ImportValue: !Sub ${FargateStackName}-FargateEcsClusterName
       ServiceName: !Ref AWS::StackName
-      # DesiredCount: !Ref DefaultTaskMinContainerCount
-      DesiredCount: 0
+      DesiredCount: !Ref TaskMinContainerCount
       LaunchType: FARGATE
-      TaskDefinition: !Ref DefaultFargateTaskDefinition
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet1ID
+            - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet2ID
+            - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet3ID
+    DependsOn:
+      - TaskDefinition
+
+  ServiceWithAlb:
+    Type: AWS::ECS::Service
+    Condition: AddServiceToAlb
+    Properties:
+      Cluster:
+        Fn::ImportValue: !Sub ${FargateStackName}-FargateEcsClusterName
+      ServiceName: !Ref AWS::StackName
+      DesiredCount: !Ref TaskMinContainerCount
+      LaunchType: FARGATE
+      TaskDefinition: !Ref TaskDefinition
       LoadBalancers:
         - ContainerName: !Ref GitSourceRepo
           ContainerPort:
             Fn::ImportValue: !Sub ${NetworkStackName}-AppIngressPort
-          # ContainerPort: 80
-          TargetGroupArn: !Ref DefaultTargetGroup
+          TargetGroupArn: !Ref TargetGroup
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
           SecurityGroups:
             - Fn::ImportValue: !Sub ${NetworkStackName}-AppSecurityGroupID
-          # SecurityGroups:
-          #   - !Ref AppSecurityGroup
-
           Subnets:
             - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet1ID
             - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet2ID
             - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet3ID
-          # Subnets: !Ref PrivateSubnets
-      # Role: !Ref FargateServiceRole
     DependsOn:
-      - FargateEcsCluster
-      - DefaultFargateTaskDefinition
-      - LoadBalancerListener
+      - TaskDefinition
 
-  ServiceAutoScalingRole:
+  AutoScalingRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -893,30 +698,30 @@ Resources:
                   - cloudwatch:PutMetricAlarm
                   - ecs:DescribeServices
                   - ecs:UpdateService
-                Resource: "*"
+                Resource: '*'
 
-  DefaultServiceScalingTarget:
+  ScalingTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
     Properties:
-      MinCapacity: !Ref DefaultTaskMinContainerCount
-      MaxCapacity: !Ref DefaultTaskMaxContainerCount
+      MinCapacity: !Ref TaskMinContainerCount
+      MaxCapacity: !Ref TaskMaxContainerCount
       ResourceId: !Sub
-        - service/${EcsClusterName}/${EcsDefaultServiceName}
-        - EcsClusterName: !Ref FargateEcsCluster
-          EcsDefaultServiceName: !GetAtt DefaultFargateService.Name
-      RoleARN: !GetAtt ServiceAutoScalingRole.Arn
+        - service/${EcsClusterName}/${ServiceName}
+        - EcsClusterName:
+            Fn::ImportValue: !Sub ${FargateStackName}-FargateEcsClusterName
+          ServiceName: !If [ AddServiceToAlb, !GetAtt ServiceWithAlb.Name, !GetAtt ServiceWithoutAlb.Name ]
+      RoleARN: !GetAtt AutoScalingRole.Arn
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
     DependsOn:
-      - DefaultFargateService
-      - ServiceAutoScalingRole
+      - AutoScalingRole
 
-  DefaultServiceScaleOutPolicy:
+  ScaleOutPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
       PolicyName: ScaleOutPolicy
       PolicyType: StepScaling
-      ScalingTargetId: !Ref DefaultServiceScalingTarget
+      ScalingTargetId: !Ref ScalingTarget
       StepScalingPolicyConfiguration:
         AdjustmentType: ChangeInCapacity
         Cooldown: 60
@@ -924,14 +729,14 @@ Resources:
         StepAdjustments:
           - ScalingAdjustment: 1
             MetricIntervalLowerBound: 0
-    DependsOn: DefaultServiceScalingTarget
+    DependsOn: ScalingTarget
 
-  DefaultServiceScaleInPolicy:
+  ScaleInPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
       PolicyName: ScaleInPolicy
       PolicyType: StepScaling
-      ScalingTargetId: !Ref DefaultServiceScalingTarget
+      ScalingTargetId: !Ref ScalingTarget
       StepScalingPolicyConfiguration:
         AdjustmentType: ChangeInCapacity
         Cooldown: 60
@@ -939,102 +744,119 @@ Resources:
         StepAdjustments:
           - ScalingAdjustment: -1
             MetricIntervalUpperBound: 0
-    DependsOn: DefaultServiceScalingTarget
+    DependsOn: ScalingTarget
 
-  DefaultServiceScaleOutAlarm:
+  ScaleOutAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      EvaluationPeriods: !Ref DefaultServiceScaleEvaluationPeriods
+      EvaluationPeriods: !Ref CpuAlarmEvaluationPeriods
       Statistic: Average
       TreatMissingData: notBreaching
-      Threshold: !Ref DefaultServiceCpuScaleOutThreshold
+      Threshold: !Ref CpuScaleOutThreshold
       AlarmDescription: Alarm to add capacity if CPU is high
       Period: 60
       AlarmActions:
-        - !Ref DefaultServiceScaleOutPolicy
+        - !Ref ScaleOutPolicy
       Namespace: AWS/ECS
       Dimensions:
         - Name: ClusterName
-          Value: !Ref FargateEcsCluster
+          Value:
+            Fn::ImportValue: !Sub ${FargateStackName}-FargateEcsClusterName
         - Name: ServiceName
-          Value: !GetAtt DefaultFargateService.Name
+          Value: !If [ AddServiceToAlb, !GetAtt ServiceWithAlb.Name, !GetAtt ServiceWithoutAlb.Name ]
       ComparisonOperator: GreaterThanThreshold
       MetricName: CPUUtilization
     DependsOn:
-      - DefaultFargateService
-      - DefaultServiceScaleOutPolicy
+      - ScaleOutPolicy
 
-  DefaultServiceScaleInAlarm:
+  ScaleInAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      EvaluationPeriods: !Ref DefaultServiceScaleEvaluationPeriods
+      EvaluationPeriods: !Ref CpuAlarmEvaluationPeriods
       Statistic: Average
       TreatMissingData: notBreaching
-      Threshold: !Ref DefaultServiceCpuScaleInThreshold
+      Threshold: !Ref CpuScaleInThreshold
       AlarmDescription: Alarm to reduce capacity if container CPU is low
       Period: 300
       AlarmActions:
-        - !Ref DefaultServiceScaleInPolicy
+        - !Ref ScaleInPolicy
       Namespace: AWS/ECS
       Dimensions:
         - Name: ClusterName
-          Value: !Ref FargateEcsCluster
+          Value:
+            Fn::ImportValue: !Sub ${FargateStackName}-FargateEcsClusterName
         - Name: ServiceName
-          Value: !GetAtt DefaultFargateService.Name
+          Value: !If [ AddServiceToAlb, !GetAtt ServiceWithAlb.Name, !GetAtt ServiceWithoutAlb.Name ]
       ComparisonOperator: LessThanThreshold
       MetricName: CPUUtilization
     DependsOn:
-      - DefaultFargateService
-      - DefaultServiceScaleInPolicy
+      - ScaleInPolicy
 
-  LoadBalancerListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
+  ServiceRoute53Record:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateRoute53Record
     Properties:
-      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Name: !Ref ServiceHostname
+      HostedZoneName: !Sub ${HostedZoneName}.
+      Type: A
+      AliasTarget:
+        HostedZoneId:
+          Fn::ImportValue: !Sub ${FargateStackName}-ApplicationLoadBalancerCanonicalHostedZoneId
+        DNSName:
+          Fn::ImportValue: !Sub ${FargateStackName}-ApplicationLoadBalancerBaseDnsName
+
+  # The health checks can be further tuned if your requirements differ
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: AddServiceToAlb
+    Properties:
+      VpcId:
+        Fn::ImportValue: !Sub ${NetworkStackName}-VpcID
       Port:
-        Fn::ImportValue: !Sub ${NetworkStackName}-ELBIngressPort
-      # Port: 80
-      Protocol: !If [IsTlsEnabled, HTTPS, HTTP]
-      Certificates:
-        - CertificateArn:
-            !If [IsTlsEnabled, !Ref SSLCertificateArn, !Ref "AWS::NoValue"]
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref DefaultTargetGroup
+        Fn::ImportValue: !Sub ${NetworkStackName}-AppIngressPort
+      Protocol: !Ref AppProtocol
+      Matcher:
+        HttpCode: 200
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckProtocol: !Ref AppProtocol
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: 300
+      TargetType: ip
+      Tags:
+      - Key: Repository
+        Value: !Ref GitSourceRepo
+      - Key: Branch
+        Value: !Ref GitBranch
+      - Key: Stack
+        Value: !Ref AWS::StackName
+      - Key: Environment
+        Value: !Ref EnvironmentName
+
+  ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: AddServiceToAlb
+    Properties:
+      ListenerArn:
+        Fn::ImportValue: !Sub ${FargateStackName}-ApplicationLoadBalancerListenerArn
+      Priority: !Ref ServiceLBListenerPriority
+      Conditions:
+        - Field: !If [ IsUrlPathRouting, path-pattern, host-header ]
+          Values:
+            - !If [ IsUrlPathRouting, !Ref ServiceUrlPath, !Ref ServiceHostname ]
+      Actions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
     DependsOn:
-      - DefaultTargetGroup
-      - ApplicationLoadBalancer
-
-  LBLatency:
-    Type: AWS::CloudWatch::Alarm
-    Condition: IsLBAlarmEnabled
-    Properties:
-      AlarmDescription: !Sub LB latency is over ${LoadBalancerLatencySeconds} second(s) for ${LoadBalancerAlarmEvaluationPeriods} period(s) of ${LoadBalancerAlarmEvaluationPeriodSeconds} seconds
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Ref LoadBalancerAlarmTopic
-      Namespace: AWS/ApplicationELB
-      MetricName: TargetResponseTime
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      Unit: Seconds
-      Statistic: Average
-      EvaluationPeriods: !Ref LoadBalancerAlarmEvaluationPeriods
-      Period: !Ref LoadBalancerAlarmEvaluationPeriodSeconds
-      Threshold: !Ref LoadBalancerLatencySeconds
-      Dimensions:
-        - Name: LoadBalancer
-          Value: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
-    DependsOn: ApplicationLoadBalancer
-
-  LoadBalancerAlarmTopic:
-    Type: AWS::SNS::Topic
-    Condition: IsLBAlarmEnabled
-    Properties:
-      DisplayName: LoadBalancer Alarm Topic
+      - TargetGroup
 
 Outputs:
+
   Name:
-    Description: Fargate Stack Name
+    Description: Fargate Service Stack Name
     Value: !Ref AWS::StackName
     Export:
       Name: !Sub ${AWS::StackName}-Name
@@ -1060,74 +882,15 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}-EcrDockerRepositoryUri
 
-  FargateEcsClusterName:
-    Value: !Ref FargateEcsCluster
+  ServiceArn:
+    Value: !If [ AddServiceToAlb, !Ref ServiceWithAlb, !Ref ServiceWithoutAlb ]
     Export:
-      Name: !Sub ${AWS::StackName}-FargateEcsClusterName
+      Name: !Sub ${AWS::StackName}-ServiceArn
 
-  FargateEcsClusterArn:
-    Value: !GetAtt FargateEcsCluster.Arn
+  ServiceName:
+    Value: !If [ AddServiceToAlb, !GetAtt ServiceWithAlb.Name, !GetAtt ServiceWithoutAlb.Name ]
     Export:
-      Name: !Sub ${AWS::StackName}-FargateEcsClusterArn
-
-  DefaultFargateServiceArn:
-    Value: !Ref DefaultFargateService
-    Export:
-      Name: !Sub ${AWS::StackName}-DefaultFargateServiceArn
-
-  DefaultFargateServiceName:
-    Value: !GetAtt DefaultFargateService.Name
-    Export:
-      Name: !Sub ${AWS::StackName}-DefaultFargateServiceName
-
-  ApplicationLoadBalancerArn:
-    Value: !Ref ApplicationLoadBalancer
-    Export:
-      Name: !Sub ${AWS::StackName}-ApplicationLoadBalancerArn
-
-  ApplicationLoadBalancerDnsName:
-    Value:
-      !If [
-        CreateRoute53Record,
-        !Ref LoadBalancerDomainName,
-        !GetAtt ApplicationLoadBalancer.DNSName,
-      ]
-    Export:
-      Name: !Sub ${AWS::StackName}-ApplicationLoadBalancerDnsName
-
-  ApplicationLoadBalancerBaseDnsName:
-    Value: !GetAtt ApplicationLoadBalancer.DNSName
-    Export:
-      Name: !Sub ${AWS::StackName}-ApplicationLoadBalancerBaseDnsName
-
-  ApplicationLoadBalancerCanonicalHostedZoneId:
-    Value: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
-    Export:
-      Name: !Sub ${AWS::StackName}-ApplicationLoadBalancerCanonicalHostedZoneId
-
-  ApplicationLoadBalancerName:
-    Value: !GetAtt ApplicationLoadBalancer.LoadBalancerName
-    Export:
-      Name: !Sub ${AWS::StackName}-ApplicationLoadBalancerName
-
-  ApplicationLoadBalancerListenerArn:
-    Value: !Ref LoadBalancerListener
-    Export:
-      Name: !Sub ${AWS::StackName}-ApplicationLoadBalancerListenerArn
-
-  LoadBalancerAlarmTopicArn:
-    Description: LoadBalancer Alarm Topic ARN
-    Value: !Ref LoadBalancerAlarmTopic
-    Condition: IsLBAlarmEnabled
-    Export:
-      Name: !Sub ${AWS::StackName}-LoadBalancerAlarmTopicArn
-
-  LoadBalancerAlarmTopicName:
-    Description: LoadBalancer Alarm Topic Name
-    Value: !GetAtt LoadBalancerAlarmTopic.TopicName
-    Condition: IsLBAlarmEnabled
-    Export:
-      Name: !Sub ${AWS::StackName}-LoadBalancerAlarmTopicName
+      Name: !Sub ${AWS::StackName}-ServiceName
 
   CodePipelineArtifactBucketName:
     Value: !Ref CodePipelineArtifactBucket
@@ -1138,3 +901,5 @@ Outputs:
     Value: !GetAtt CodePipelineArtifactBucket.Arn
     Export:
       Name: !Sub ${AWS::StackName}-CodePipelineArtifactBucketArn
+
+
