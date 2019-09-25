@@ -1,22 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
 
-# A CloudFormation template to create/configure an AWS Fargate Cluster, Application Load Balancer (ALB),
-# Amazon Elastic Container Registry (ECR), AWS CodePipeline and Service based on parameters. Optionally,
-# you can specify a domain name and/or an AWS Certificate Manager ARN can be passed if you want to
-# enable TLS on the ALB. If you want to create the DNS alias to the ALB, your DNS must be hosted in
-# Amazon Route 53.
-#
-# From the Startup Kit Templates, this template requires the name of an existing vpc.cfn.yml stack as
-# a parameter.
-#
-# If you pass the optional database stack name, it pulls the values for the DB endpoint and username
-# and sets them as environment variables in the container.
-#
-# The service creates CloudWatch Alarms to monitor CPU utilization in order to determine container
-# counts (up and down), but other metrics may be more important in your system.
-# See: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service_autoscaling_tutorial.html
-#
-
 Description: ECS Fargate + CodePipline
 
 Parameters:
@@ -26,40 +9,6 @@ Parameters:
     MinLength: 1
     MaxLength: 255
     AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
-
-  # VPCId:
-  #   Description: Choose VPC
-  #   Type: AWS::EC2::VPC::Id
-  #   AllowedPattern: .+
-
-  # PrivateSubnets:
-  #   Description: Private subnets
-  #   Type: List<AWS::EC2::Subnet::Id>
-  #   AllowedPattern: .+
-
-  # PublicSubnets:
-  #   Description: Public subnets
-  #   Type: List<AWS::EC2::Subnet::Id>
-  #   AllowedPattern: .+
-
-  # AppIngressPort:
-  #   Description: The application ingress port used by security groups
-  #   Type: Number
-  #   MinValue: 0
-  #   MaxValue: 65535
-  #   ConstraintDescription: TCP ports must be between 0 - 65535
-  #   Default: 80
-
-  # LoadBalancerSecurityGroup:
-  #   Description: Choose Load Balancer Security Group
-  #   Type: AWS::EC2::SecurityGroup::Id
-  #   AllowedPattern: .+
-
-  # AppSecurityGroup:
-  #   Description: Choose Application Security Group
-  #     Type: AWS::EC2::SecurityGroup::Id
-  #     AllowedPattern: .+
-
   DatabaseStackName:
     Type: String
     Description: Name of an optional active Startup Kit CloudFormation stack that contains database resources
@@ -270,24 +219,6 @@ Conditions:
   IsDockerfilePathSpecified: !Not [!Equals [!Ref DockerfilePath, ""]]
 
 Resources:
-  # AppSecurityGroup:
-  #   Type: AWS::EC2::SecurityGroup
-  #   Properties:
-  #     GroupDescription: Enable access from ELB to app
-  #     VpcId: !Ref VPCId
-  #     SecurityGroupIngress:
-  #       - SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
-  #         IpProtocol: tcp
-  #         ToPort: !Ref AppIngressPort
-  #         FromPort: !Ref AppIngressPort
-  #       # - SourceSecurityGroupId: !Ref BastionSecurityGroup
-  #       #   IpProtocol: tcp
-  #       #   ToPort: 22
-  #       #   FromPort: 22
-  #     Tags:
-  #       - Key: Name
-  #         Value: !Sub "${AWS::StackName}-AppSecurityGroup"
-
   DefaultContainerBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
@@ -295,28 +226,6 @@ Resources:
   CodePipelineArtifactBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
-
-  # FargateServiceRole:
-  #   Type: AWS::IAM::Role
-  #   Properties:
-  #     Path: /
-  #     AssumeRolePolicyDocument:
-  #       Version: 2012-10-17
-  #       Statement:
-  #         - Effect: Allow
-  #           Principal:
-  #             Service: ecs.amazonaws.com
-  #           Action: sts:AssumeRole
-  #     Policies:
-  #       - PolicyName: root
-  #         PolicyDocument:
-  #           Version: 2012-10-17
-  #           Statement:
-  #             - Resource: "*"
-  #               Effect: Allow
-  #               Action:
-  #                 - iam:CreateServiceLinkedRole
-  #                 - iam:PutRolePolicy
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -409,20 +318,18 @@ Resources:
                   - echo Building the Docker image...          
                   - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG ${DockerfilePathParam}.
                   - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
-                  - docker build -t $IMAGE_REPO_REVERSE_PROXY_NAME:$IMAGE_TAG -f reverse-proxy/Dockerfile .
+                  - docker build -t $IMAGE_REPO_REVERSE_PROXY_NAME:$IMAGE_TAG -f nginx/Dockerfile .
                   - docker tag $IMAGE_REPO_REVERSE_PROXY_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_REVERSE_PROXY_NAME:$IMAGE_TAG
               post_build:
                 commands:
                   - echo Build completed on `date`
                   - echo Pushing the Docker image...
                   - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
-                  - printf '[{"name":"${ContainerName}","imageUri":"%s"}]' $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG > build.json
+                  # - printf '[{"name":"${ContainerName}","imageUri":"%s"}]' $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG > build.json
                   - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_REVERSE_PROXY_NAME:$IMAGE_TAG
-                  - printf '[{"name":"${ContainerName}","imageUri":"%s"}]' $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_REVERSE_PROXY_NAME:$IMAGE_TAG > build_reverse_proxy.json
+                  - printf '[{"name":"${ContainerName}","imageUri":"%s"},{"name":"nginx","imageUri":"%s"}]' $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_REVERSE_PROXY_NAME:$IMAGE_TAG > build.json
             artifacts:
-              files:
-                - build.json
-                - build_reverse_proxy.json
+              files: build.json
           - ContainerName: !Ref GitSourceRepo
             DockerfilePathParam: !If
               - IsDockerfilePathSpecified
@@ -565,21 +472,21 @@ Resources:
               InputArtifacts:
                 - Name: BuildOutput
               RunOrder: 1
-        - Name: Deploy
-          Actions:
-            - Name: Deploy
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Version: 1
-                Provider: ECS
-              Configuration:
-                ClusterName: !Ref FargateEcsCluster
-                ServiceName: !GetAtt DefaultFargateService.Name
-                FileName: build_reverse_proxy.json
-              InputArtifacts:
-                - Name: BuildOutput
-              RunOrder: 1
+        # - Name: Deploy
+        #   Actions:
+        #     - Name: Deploy
+        #       ActionTypeId:
+        #         Category: Deploy
+        #         Owner: AWS
+        #         Version: 1
+        #         Provider: ECS
+        #       Configuration:
+        #         ClusterName: !Ref FargateEcsCluster
+        #         ServiceName: !GetAtt DefaultFargateService.Name
+        #         FileName: build_reverse_proxy.json
+        #       InputArtifacts:
+        #         - Name: BuildOutput
+        #       RunOrder: 1
     DependsOn:
       - CodePipelineArtifactBucket
       - CodeBuildProject
@@ -863,17 +770,14 @@ Resources:
           Essential: true
           PortMappings:
             - ContainerPort: 80
-          Links:
-            - !Ref GitSourceRepo
-
         - Name: !Ref GitSourceRepo
           Image: !Ref SeedDockerImage
           Essential: true
           PortMappings:
-            # - ContainerPort: 80
-            - ContainerPort:
-                Fn::ImportValue: !Sub ${NetworkStackName}-AppIngressPort
-
+            - ContainerPort: 3000
+          DependsOn:
+            - ContainerName: nginx
+              Condition: START
           # Environment variables can be customized by adding parameters/values below. Secrets
           # should be stored in AWS Systems Manager Parameter Store.
           # See: https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-paramstore.html
@@ -924,10 +828,13 @@ Resources:
       LaunchType: FARGATE
       TaskDefinition: !Ref DefaultFargateTaskDefinition
       LoadBalancers:
-        - ContainerName: !Ref GitSourceRepo
+        # - ContainerName: !Ref GitSourceRepo
+        #   ContainerPort:
+        #     Fn::ImportValue: !Sub ${NetworkStackName}-AppIngressPort
+        #   TargetGroupArn: !Ref DefaultTargetGroup
+        - ContainerName: nginx
           ContainerPort:
             Fn::ImportValue: !Sub ${NetworkStackName}-AppIngressPort
-          # ContainerPort: 80
           TargetGroupArn: !Ref DefaultTargetGroup
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -936,7 +843,6 @@ Resources:
             - Fn::ImportValue: !Sub ${NetworkStackName}-AppSecurityGroupID
           # SecurityGroups:
           #   - !Ref AppSecurityGroup
-
           Subnets:
             - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet1ID
             - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet2ID
